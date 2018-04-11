@@ -21,8 +21,16 @@ public class Files {
         return toResourcePath(testClass) + ".java";
     }
 
+    public static String toKotlinResourcePath(Class testClass) {
+        return toResourcePath(testClass) + ".kt";
+    }
+
     public static String toJavaPath(Class testClass) {
         return toPath(testClass) + ".java";
+    }
+
+    public static String toKotlinPath(Class testClass) {
+        return toPath(testClass) + ".kt";
     }
 
     public static String toHtmlPath(Class testClass) {
@@ -47,7 +55,7 @@ public class Files {
 
     private static Callable1<? super Character, Character> dotsToSlashes() {
         return new Callable1<Character, Character>() {
-            public Character call(Character character) throws Exception {
+            public Character call(Character character) {
                 return character == '.' ? File.separatorChar : character;
             }
         };
@@ -55,7 +63,7 @@ public class Files {
 
     private static Callable1<? super Character, Character> dotsToForwardSlashes() {
         return new Callable1<Character, Character>() {
-            public Character call(Character character) throws Exception {
+            public Character call(Character character) {
                 return character == '.' ? '/' : character;
             }
         };

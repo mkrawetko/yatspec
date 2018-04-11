@@ -29,6 +29,15 @@ public class TestMethodExtractor {
         return new TestMethod(aClass, method, name, source, scenarioTable);
     }
 
+    public TestMethod toTestMethod(Class aClass, TestParser.KotlinClass.Method kmethod, Method method) {
+        final String name = kmethod.name;
+
+        final JavaSource source = new JavaSource(kmethod.sourceCode);
+//        final ScenarioTable scenarioTable = getScenarioTable(javaMethod);
+//        return new TestMethod(aClass, method, name, source, scenarioTable);
+        return null;
+    }
+
     @SuppressWarnings({"unchecked"})
     private ScenarioTable getScenarioTable(JavaMethod method) {
         ScenarioTable table = new ScenarioTable();
@@ -72,7 +81,7 @@ public class TestMethodExtractor {
     private Callable1<? super Annotation, Iterable<Annotation>> rows() {
         return new Callable1<Annotation, Iterable<Annotation>>() {
             @Override
-            public Iterable<Annotation> call(Annotation annotation) throws Exception {
+            public Iterable<Annotation> call(Annotation annotation) {
                 return ((AnnotationValueList) annotation.getProperty("value")).getValueList();
             }
         };

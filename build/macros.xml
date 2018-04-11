@@ -26,7 +26,7 @@
         </sequential>
     </macrodef>
 
-	<macrodef name="compile.and.jar">
+    <macrodef name="compile.and.jar">
         <attribute name="src"/>
         <attribute name="jar"/>
         <attribute name="classpathref"/>
@@ -35,7 +35,10 @@
 
         <sequential>
             <mkdir dir="@{classes}"/>
-            <javac srcdir="@{src}" destdir="@{classes}" classpathref="@{classpathref}" target="1.5" debug="true" includeantruntime="false"/>
+            <javac srcdir="@{src}" destdir="@{classes}" classpathref="@{classpathref}" target="1.6" debug="true"
+                   includeantruntime="false">
+                <withKotlin/>
+            </javac>
 
             <copy todir="@{classes}">
                 <fileset dir="@{src}">
