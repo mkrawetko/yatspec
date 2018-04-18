@@ -4,8 +4,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.psi.search.GlobalSearchScope
 import org.jetbrains.kotlin.analyzer.ModuleContent
 import org.jetbrains.kotlin.analyzer.ModuleInfo
-import org.jetbrains.kotlin.analyzer.PlatformAnalysisParameters
-import org.jetbrains.kotlin.analyzer.common.DefaultAnalyzerFacade
+import org.jetbrains.kotlin.analyzer.ResolverForProjectImpl
 import org.jetbrains.kotlin.cli.common.CLIConfigurationKeys
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageLocation
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
@@ -14,18 +13,20 @@ import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
 import org.jetbrains.kotlin.cli.jvm.compiler.JvmPackagePartProvider
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
+import org.jetbrains.kotlin.cli.jvm.compiler.TopDownAnalyzerFacadeForJVM
 import org.jetbrains.kotlin.cli.jvm.config.addJvmClasspathRoots
-import org.jetbrains.kotlin.config.CompilerConfiguration
-import org.jetbrains.kotlin.config.addKotlinSourceRoot
+import org.jetbrains.kotlin.config.*
 import org.jetbrains.kotlin.container.get
 import org.jetbrains.kotlin.context.ProjectContext
 import org.jetbrains.kotlin.descriptors.ModuleDescriptor
 import org.jetbrains.kotlin.load.java.JvmAbi
+import org.jetbrains.kotlin.load.java.structure.impl.JavaClassImpl
 import org.jetbrains.kotlin.name.Name
-import org.jetbrains.kotlin.resolve.LazyTopDownAnalyzer
-import org.jetbrains.kotlin.resolve.MultiTargetPlatform
-import org.jetbrains.kotlin.resolve.TopDownAnalysisContext
-import org.jetbrains.kotlin.resolve.TopDownAnalysisMode
+import org.jetbrains.kotlin.psi.KtBlockExpression
+import org.jetbrains.kotlin.resolve.*
+import org.jetbrains.kotlin.resolve.jvm.JvmAnalyzerFacade
+import org.jetbrains.kotlin.resolve.jvm.JvmPlatformParameters
+import org.jetbrains.kotlin.resolve.jvm.platform.JvmPlatform
 import org.jetbrains.kotlin.utils.PathUtil
 import java.io.File
 import java.util.*
@@ -40,12 +41,31 @@ class KotlinScriptParser {
         override fun dependencies() = listOf(this)
 
         override fun dependencyOnBuiltIns(): ModuleInfo.DependencyOnBuiltIns =
-                if (dependOnOldBuiltIns) ModuleInfo.DependenciesOnBuiltIns.LAST else ModuleInfo.DependenciesOnBuiltIns.NONE
+                if (dependOnOldBuiltIns) ModuleInfo.DependencyOnBuiltIns.LAST else ModuleInfo.DependencyOnBuiltIns.NONE
     }
 
     companion object {
         private val LOG = Logger.getLogger(KotlinScriptParser::class.java.name)
         private val messageCollector = object : MessageCollector {
+            override fun report(severity: CompilerMessageSeverity, message: String, location: CompilerMessageLocation?) {
+//                val path = location.path
+//                val position = if (path == null) "" else "$path: (${location.line}, ${location.column}) "
+//
+//                val text = position + message
+                val text = "bla"
+
+                if (CompilerMessageSeverity.VERBOSE.contains(severity)) {
+                    LOG.finest(text)
+                } else if (severity.isError) {
+                    LOG.severe(text)
+                    hasErrors = true
+                } else if (severity == CompilerMessageSeverity.INFO) {
+                    LOG.info(text)
+                } else {
+                    LOG.warning(text)
+                }
+            }
+
             private var hasErrors = false
             override fun clear() {
                 hasErrors = false
@@ -55,23 +75,23 @@ class KotlinScriptParser {
                 return hasErrors
             }
 
-            override fun report(severity: CompilerMessageSeverity, message: String, location: CompilerMessageLocation) {
-                val path = location.path
-                val position = if (path == null) "" else "$path: (${location.line}, ${location.column}) "
-
-                val text = position + message
-
-                if (CompilerMessageSeverity.VERBOSE.contains(severity)) {
-                    LOG.finest(text)
-                } else if (CompilerMessageSeverity.ERRORS.contains(severity)) {
-                    LOG.severe(text)
-                    hasErrors = true
-                } else if (severity == CompilerMessageSeverity.INFO) {
-                    LOG.info(text)
-                } else {
-                    LOG.warning(text)
-                }
-            }
+//            override fun report(severity: CompilerMessageSeverity, message: String, location: CompilerMessageLocation) {
+//                val path = location.path
+//                val position = if (path == null) "" else "$path: (${location.line}, ${location.column}) "
+//
+//                val text = position + message
+//
+//                if (CompilerMessageSeverity.VERBOSE.contains(severity)) {
+//                    LOG.finest(text)
+//                } else if (severity.isError) {
+//                    LOG.severe(text)
+//                    hasErrors = true
+//                } else if (severity == CompilerMessageSeverity.INFO) {
+//                    LOG.info(text)
+//                } else {
+//                    LOG.warning(text)
+//                }
+//            }
         }
 
         private val classPath: ArrayList<File> by lazy {
@@ -85,12 +105,12 @@ class KotlinScriptParser {
         // The Kotlin compiler configuration
         val configuration = CompilerConfiguration()
 
-        val groupingCollector = GroupingMessageCollector(messageCollector)
-        val severityCollector = GroupingMessageCollector(groupingCollector)
+        val groupingCollector = GroupingMessageCollector(messageCollector, true)
+        val severityCollector = GroupingMessageCollector(groupingCollector, true)
         configuration.put(CLIConfigurationKeys.MESSAGE_COLLECTOR_KEY, severityCollector)
 
 
-        configuration.addJvmClasspathRoots(PathUtil.getJdkClassesRoots())
+        configuration.addJvmClasspathRoots(PathUtil.getJdkClassesRootsFromCurrentJre())
         // The path to .kt files sources
         files.forEach { configuration.addKotlinSourceRoot(it) }
         // Configuring Kotlin class path
@@ -105,15 +125,41 @@ class KotlinScriptParser {
 
             val moduleInfo = SourceModuleInfo(Name.special("<${JvmAbi.DEFAULT_MODULE_NAME}"), capabilities, false)
             val project = ktFiles.firstOrNull()?.project ?: throw AssertionError("No files to analyze")
-            val resolver = DefaultAnalyzerFacade.setupResolverForProject(
+
+
+            LanguageVersionSettingsImpl(LanguageVersion.LATEST_STABLE, ApiVersion.createByLanguageVersion(LanguageVersion.LATEST_STABLE))
+            val library = object : ModuleInfo {
+                override val name: Name = Name.special("<library>")
+                override fun dependencies(): List<ModuleInfo> = listOf(this)
+            }
+            val module = object : ModuleInfo {
+                override val name: Name = Name.special("<module>")
+                override fun dependencies(): List<ModuleInfo> = listOf(this, library)
+            }
+
+            val projectContext = ProjectContext(project)
+            val resolver = ResolverForProjectImpl(
                     "sources for metadata serializer",
-                    ProjectContext(project), listOf(moduleInfo),
+                    projectContext,
+                    listOf(moduleInfo),
+                    { JvmAnalyzerFacade },
                     { ModuleContent(ktFiles, GlobalSearchScope.allScope(project)) },
-                    object : PlatformAnalysisParameters {},
-                    packagePartProviderFactory = { _, content ->
-                        JvmPackagePartProvider(environment, content.moduleContentScope)
+                    JvmPlatformParameters {
+                        val file = (it as JavaClassImpl).psi.containingFile.virtualFile
+                        if (file in TopDownAnalyzerFacadeForJVM.newModuleSearchScope(project, ktFiles))
+                            module
+                        else
+                            library
                     },
-                    modulePlatforms = { MultiTargetPlatform.Common }
+                    CompilerEnvironment,
+//                    packagePartProviderFactory = { _, content ->
+//                        JvmPackagePartProvider(LanguageVersionSettingsImpl(LanguageVersion.LATEST_STABLE, ApiVersion.createByLanguageVersion(LanguageVersion.LATEST_STABLE)), content.moduleContentScope)
+//                    },
+                    packagePartProviderFactory = { _, content ->
+                        JvmPackagePartProvider(configuration.languageVersionSettings, content.moduleContentScope)
+                    },
+//                    builtIns = JvmBuiltIns(projectContext.storageManager),
+                    modulePlatforms = { JvmPlatform.multiTargetPlatform }
             )
 
             val container = resolver.resolverForModule(moduleInfo).componentProvider
@@ -126,4 +172,18 @@ class KotlinScriptParser {
             }
         }
     }
+}
+
+
+fun main(args: Array<String>) {
+    val scriptFile = "/Users/michal/workspace/my/test/kotlin-script-parser-test/TestParserKotlinTest.kt"
+
+    val parser = KotlinScriptParser()
+
+    val analyzeContext = parser.parse(scriptFile)
+
+    val function = analyzeContext.functions.keys.first()
+    val body = function.bodyExpression as KtBlockExpression
+
+    val i = 0
 }
