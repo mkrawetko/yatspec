@@ -9,11 +9,12 @@ import com.thoughtworks.qdox.JavaDocBuilder;
 import com.thoughtworks.qdox.model.Annotation;
 import com.thoughtworks.qdox.model.JavaClass;
 import com.thoughtworks.qdox.model.JavaMethod;
-import org.jetbrains.kotlin.resolve.TopDownAnalysisContext;
 import org.junit.Test;
 
+import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -44,15 +45,34 @@ public class TestParser {
             return empty();
         }
 
-        Map<String, List<KotlinClass.Method>> sourceMethodsByName = getMethods(kotlinClass.get()).toMap(kSourceMethodName());
+        Map<String, Method> sourceMethodsByName = new HashMap<String, Method>();
+        for (int i = 0; i < methods.size(); i++) {
+            if (methods.get(i).isAnnotationPresent(Test.class)) {
+                sourceMethodsByName.put(methods.get(i).getName(), methods.get(i));
+            }
+        }
+
+        Map<String, KotlinClass.Method> sourceKMethodsByName = new HashMap<String, KotlinClass.Method>();
+
+        for (Map.Entry<String, Method> testMethod : sourceMethodsByName.entrySet()) {
+            for (int j = 0; j < kotlinClass.get().methods.size(); j++) {
+                KotlinClass.Method candidate = kotlinClass.get().methods.get(j);
+                if (testMethod.getKey().equals(candidate.name)) {
+                    sourceKMethodsByName.put(candidate.name, candidate);
+                }
+            }
+        }
+
+//        Map<String, List<KotlinClass.Method>> sourcekMethodsByName = getMethods(kotlinClass.get()).toMap(kSourceMethodName());
         Map<String, List<java.lang.reflect.Method>> reflectionMethodsByName = methods.toMap(reflectionMethodName());
 
         List<TestMethod> testMethods = new ArrayList<TestMethod>();
         TestMethodExtractor extractor = new TestMethodExtractor();
         for (String name : sourceMethodsByName.keySet()) {
-            List<KotlinClass.Method> sourceMethods = sourceMethodsByName.get(name);
+            Method sourceMethods = sourceMethodsByName.get(name);
+            KotlinClass.Method kmethod = sourceKMethodsByName.get(name);
             List<java.lang.reflect.Method> reflectionMethods = reflectionMethodsByName.get(name);
-            testMethods.add(extractor.toTestMethod(aClass, sourceMethods.get(0), reflectionMethods.get(0)));
+            testMethods.add(extractor.toTestMethod(aClass, sourceMethods, kmethod));
             // TODO: If people overload test methods we will have to use the full name rather than the short name
         }
 
@@ -118,20 +138,28 @@ public class TestParser {
             public KotlinClass call(URL url) {
                 List<KotlinClass.Method> methods = new ArrayList<KotlinClass.Method>();
 
-                for (java.lang.reflect.Method m : aClass.getMethods()) {
-                    List<KotlinClass.Annotation> annotations = new ArrayList<KotlinClass.Annotation>();
-                    for (java.lang.annotation.Annotation a : m.getDeclaredAnnotations()) {
-                        annotations.add(new KotlinClass.Annotation(a.getClass().getName()));
+                MyKotlinParser.ParsedFile parsedFile = new MyKotlinParser().parse(url.getPath());
+                for (MyKotlinParser.Method parsedMethod : parsedFile.methods) {
+                    Method javaMethod = getMethodBody(aClass.getDeclaredMethods(), parsedMethod.name);
+                    if (javaMethod != null) {
+                        List<KotlinClass.Annotation> annotations = new ArrayList<KotlinClass.Annotation>();
+                        for (java.lang.annotation.Annotation a : javaMethod.getDeclaredAnnotations()) {
+                            annotations.add(new KotlinClass.Annotation(a.getClass().getName()));
+                        }
+
+                        methods.add(new KotlinClass.Method(javaMethod.getName(), annotations, parsedMethod.body, parsedMethod.paremeters));
                     }
-                    KotlinScriptParser parser = new KotlinScriptParser();
-
-                    TopDownAnalysisContext analyzeContext = parser.parse(url.getPath());
-
-                    analyzeContext.getFunctions();
-
-                    methods.add(new KotlinClass.Method(m.getName(), annotations));
                 }
                 return new KotlinClass(aClass.getName(), methods);
+            }
+
+            private Method getMethodBody(Method[] javaMethods, String name) {
+                for (Method javaMethod : javaMethods) {
+                    if (name.equals(javaMethod.getName())) {
+                        return javaMethod;
+                    }
+                }
+                return null;
             }
         };
     }
@@ -240,10 +268,17 @@ public class TestParser {
             public final String name;
             public List<Annotation> annotations;
             public String sourceCode;
+            private final List<String> parameters;
 
-            public Method(String name, List<Annotation> annotations) {
+            public Method(String name, List<Annotation> annotations, String body, List<String> parameters) {
                 this.name = name;
                 this.annotations = annotations;
+                this.sourceCode = body;
+                this.parameters = parameters;
+            }
+
+            public List<String> getParameters() {
+                return parameters;
             }
         }
 

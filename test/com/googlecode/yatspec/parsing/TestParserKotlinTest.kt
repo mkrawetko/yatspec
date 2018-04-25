@@ -23,7 +23,6 @@ class TestParserKotlinTest {
 
     @Test
     @Notes("Some method notes")
-    @Throws(Exception::class)
     fun testParseTestMethods() {
         val methods = parseTestMethods(javaClass)
         assertThat(notes(sequence(methods).first().annotations).get().value, `is`("Some method notes"))
@@ -31,27 +30,23 @@ class TestParserKotlinTest {
 
     @Test
     @Table(Row("meh"))
-    @Throws(Exception::class)
     fun yatspecWillTrimWhitespaceLeftBehindByQDoxInTableTestAnnotationsWhenAFieldVariableIsDeclared(something: String) {
         //A workaround for weirdness in QDox
     }
 
     @Test
     @Table(Row("string with\" quotes"))
-    @Throws(Exception::class)
     fun supportsQuotationMarksInParameters(value: String) {
         assertThat(value, `is`("string with\" quotes"))
     }
 
     @Test
     @Table(Row("string with\\ escape chars"))
-    @Throws(Exception::class)
     fun supportsEscapedCharactersInParameters(value: String) {
         assertThat(value, `is`("string with\\ escape chars"))
     }
 
     @Test
-    @Throws(Exception::class)
     fun shouldParseTestMethodsFromClassFoundInClassPathRatherThanFileSystem() {
         assertExistsInClassLoader("com/googlecode/yatspec/parsing/test/TestSource.java", "TestParserTest-sources.jar")
         assertExistsInClassLoader("com/googlecode/yatspec/parsing/test/TestSource.class", "TestParserTest.jar")
@@ -62,7 +57,6 @@ class TestParserKotlinTest {
 
     @Test
     @Table(Row(A_SIMPLE_STRING))
-    @Throws(Exception::class)
     fun shouldParseParametersDeclaredAsConstants(param: String) {
         assertEquals(format(Locale.ENGLISH, "failed to parse parameter [%s]", param), "aString", param)
     }

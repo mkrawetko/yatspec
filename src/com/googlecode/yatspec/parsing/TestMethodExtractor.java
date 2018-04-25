@@ -1,8 +1,10 @@
 package com.googlecode.yatspec.parsing;
 
 import com.googlecode.totallylazy.Callable1;
+import com.googlecode.totallylazy.Predicate;
 import com.googlecode.totallylazy.Sequence;
 import com.googlecode.totallylazy.Strings;
+import com.googlecode.yatspec.junit.Row;
 import com.googlecode.yatspec.junit.Table;
 import com.googlecode.yatspec.state.ScenarioTable;
 import com.googlecode.yatspec.state.TestMethod;
@@ -29,13 +31,13 @@ public class TestMethodExtractor {
         return new TestMethod(aClass, method, name, source, scenarioTable);
     }
 
-    public TestMethod toTestMethod(Class aClass, TestParser.KotlinClass.Method kmethod, Method method) {
-        final String name = kmethod.name;
+    public TestMethod toTestMethod(Class aClass, Method method, TestParser.KotlinClass.Method method1) {
+        final String name = method.getName();
 
-        final JavaSource source = new JavaSource(kmethod.sourceCode);
-//        final ScenarioTable scenarioTable = getScenarioTable(javaMethod);
-//        return new TestMethod(aClass, method, name, source, scenarioTable);
-        return null;
+        final JavaSource source = new JavaSource(method1.sourceCode);
+        final ScenarioTable scenarioTable = getKScenarioTable(method1, method);
+        return new TestMethod(aClass, method, name, source, scenarioTable);
+//        return null;
     }
 
     @SuppressWarnings({"unchecked"})
@@ -46,6 +48,39 @@ public class TestMethodExtractor {
         final Sequence<Annotation> rows = getRows(method);
         for (Annotation row : rows) {
             List<String> values = getRowValues(row);
+            table.addRow(sequence(values).map(Strings.trim()).toList());
+        }
+        return table;
+    }
+
+    @SuppressWarnings({"unchecked"})
+    private ScenarioTable getKScenarioTable(TestParser.KotlinClass.Method method, Method method1) {
+        ScenarioTable table = new ScenarioTable();
+        table.setHeaders(method.getParameters());
+
+
+        Sequence<Row> rows = sequence(method1)
+                .filter(new Predicate<Method>() {
+                    @Override
+                    public boolean matches(Method other) {
+                        return other.isAnnotationPresent(Table.class);
+                    }
+                })
+                .map(new Callable1<Method, Table>() {
+                    @Override
+                    public Table call(Method method) {
+                        return method.getAnnotation(Table.class);
+                    }
+                })
+                .flatMap(new Callable1<Table, Iterable<Row>>() {
+                    @Override
+                    public Iterable<Row> call(Table table) {
+                        return Arrays.asList(table.value());
+                    }
+                });
+//        final Sequence<Annotation> rows = getRows(method);
+        for (Row row : rows) {
+            List<String> values = Arrays.asList(row.value());
             table.addRow(sequence(values).map(Strings.trim()).toList());
         }
         return table;
